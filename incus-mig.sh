@@ -43,7 +43,7 @@ if incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
     exit 1
 fi
 
-# --- ROBUST MIG GPU SELECTION ---
+# --- MIG GPU SELECTION ---
 SELECTED_MIG_UUID=""
 SELECTED_PCI_ID=""
 if [ "$MIG_ENABLED" = true ]; then
@@ -84,8 +84,26 @@ fi
 
 # --- IP & PASSWORD ---
 if [ -z "$CUSTOM_IP" ]; then
-    LAST_IP=$(incus list -f compact | grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b" | sort -V | tail -n 1)
-    [ -z "$LAST_IP" ] && TARGET_IP="10.95.1.2" || TARGET_IP="$(echo $LAST_IP | cut -d. -f1-3).$(( $(echo $LAST_IP | cut -d. -f4) + 1 ))"
+    echo "Status: Calculating next available IP in the 10.95.1.x range..."
+
+    LAST_IP=$(incus list -f compact | grep -oE "\b10\.95\.1\.[0-9]{1,3}\b" | sort -t. -k4,4n | tail -n 1)
+
+    if [ -z "$LAST_IP" ]; then
+        # Fallback if no containers in this range exist yet
+        TARGET_IP="10.95.1.2"
+    else
+        # Extract the 4th octet, increment it, and rebuild the IP
+        BASE_IP="10.95.1"
+        LAST_OCTET=$(echo "$LAST_IP" | cut -d. -f4)
+        NEXT_OCTET=$((LAST_OCTET + 1))
+
+        if [ "$NEXT_OCTET" -ge 254 ]; then
+            echo "Error: IP range 10.95.1.x is full!"
+            exit 1
+        fi
+
+        TARGET_IP="$BASE_IP.$NEXT_OCTET"
+    fi
 else
     TARGET_IP=$CUSTOM_IP
 fi
