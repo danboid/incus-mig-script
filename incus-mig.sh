@@ -132,8 +132,8 @@ if [ "$MIG_ENABLED" = true ]; then
     incus config device add "$CONTAINER_NAME" gpu0 gpu \
         gputype=mig \
         mig.uuid="$SELECTED_MIG_UUID" \
-        pci="$SELECTED_PCI_ID" \
-        nvidia.driver.capabilities=all
+        pci="$SELECTED_PCI_ID"
+    incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
     incus start "$CONTAINER_NAME"
 fi
 
