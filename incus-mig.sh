@@ -6,8 +6,8 @@
 # Default Values
 OS_IMAGE="images:ubuntu/24.04"
 CPU_LIMIT="8"
-RAM_LIMIT="64GB"
-DISK_LIMIT="50GB"
+RAM_LIMIT="32GB"
+DISK_LIMIT="900GB"
 MIG_ENABLED=false
 CUSTOM_IP=""
 
