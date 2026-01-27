@@ -45,11 +45,17 @@ for container in $(incus list --format csv -c n); do
 
     # --- PHASE B: Deletion logic ---
     if [[ "$STATUS" == "stopped" ]]; then
-        # If Today >= Expiry + 1 month
-        # This is equivalent to checking if Expiry is older than ONE_MONTH_AGO
+        # Check if Expiry is older than ONE_MONTH_AGO
         if [[ "$EXPIRY" < "$ONE_MONTH_AGO" || "$EXPIRY" == "$ONE_MONTH_AGO" ]]; then
-            echo "$TODAY: DELETING $container (Expired > 1 month ago on $EXPIRY)" >> "$LOG_FILE"
-            incus delete "$container"
+
+            # ONLY delete the container if NO_DETACH is false
+            if [[ "$NO_DETACH" == "false" ]]; then
+                echo "$TODAY: DELETING $container (Expired > 1 month ago on $EXPIRY)" >> "$LOG_FILE"
+                incus delete "$container"
+            else
+                echo "$TODAY: Skipping deletion for $container (user.nogpudetach is true)" >> "$LOG_FILE"
+            fi
+
         fi
     fi
 
