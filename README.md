@@ -7,6 +7,8 @@ You will need to adjust the Network Default variables to match your network befo
 
 It also auto-assigns an IP address to the container (if non is specified), configures snapshots (one every 12 hours), installs openssh-server and configures a password for the root user.
 
+incus-cleanup.sh should be configured to be run via a daily root cron job to disable and delete old containers.
+
 ## Using the -n (NO_GPU_DETACH) option
 
 This script presumes that all of your free MIG GPUs have the same configuration hence it just attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those GPUs to containers before running this script with the -g option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use the -g option.
