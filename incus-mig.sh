@@ -10,6 +10,10 @@ RAM_LIMIT="32GB"
 DISK_LIMIT="900GB"
 MIG_ENABLED=false
 CUSTOM_IP=""
+NO_GPU_DETACH="false"
+
+# Calculate Expiry Date (exactly 2 months from today)
+EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
 
 # Network Defaults
 GATEWAY="10.95.1.254"
@@ -17,18 +21,25 @@ DNS="146.87.174.121"
 SUBNET="/24"
 
 usage() {
-    echo "Usage: $0 [OPTIONS] <container_name>"
-    echo "Options: -i (IP), -c (CPU), -m (RAM), -s (Disk), -g (MIG)"
+echo "Usage: $0 [OPTIONS] <container_name>"
+    echo "Options:"
+    echo "  -i (IP)      Set custom IP"
+    echo "  -c (CPU)     Set CPU cores"
+    echo "  -m (RAM)     Set RAM limit eg 32GB"
+    echo "  -s (Disk)    Set Disk limit eg 900GB"
+    echo "  -g           Enable MIG GPU"
+    echo "  -n           Enable user.nogpudetach. Set to true with this, defaults to false."
     exit 1
 }
 
-while getopts "i:c:m:s:g" opt; do
+while getopts "i:c:m:s:gn" opt; do
     case $opt in
         i) CUSTOM_IP=$OPTARG ;;
         c) CPU_LIMIT=$OPTARG ;;
         m) RAM_LIMIT=$OPTARG ;;
         s) DISK_LIMIT=$OPTARG ;;
         g) MIG_ENABLED=true ;;
+        n) NO_GPU_DETACH="true" ;;
         *) usage ;;
     esac
 done
@@ -119,6 +130,8 @@ LAUNCH_FLAGS=(
     "--config" "snapshots.schedule=0 */12 * * *"
     "--config" "snapshots.expiry=3m"
     "--config" "snapshots.pattern={{ creation_date|date:'2006-01-02_15-04-05' }}"
+    "--config" "user.expiry=$EXPIRY_DATE"
+    "--config" "user.nogpudetach=$NO_GPU_DETACH"
 )
 [ "$MIG_ENABLED" = true ] && LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
 
@@ -173,6 +186,8 @@ incus exec "$CONTAINER_NAME" -- sh -c "apt upgrade -y"
 
 echo "------------------------------------------------"
 echo "Success: $CONTAINER_NAME is online at $TARGET_IP"
+echo "EXPIRY DATE: $EXPIRY_DATE"
+echo "NO GPU DETACH: $NO_GPU_DETACH"
 [ "$MIG_ENABLED" = true ] && echo "GPU Attached: $SELECTED_MIG_UUID (PCI $SELECTED_PCI_ID)"
 echo "ROOT PASSWORD: $ROOT_PASSWORD"
 echo "------------------------------------------------"
