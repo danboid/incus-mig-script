@@ -23,12 +23,12 @@ SUBNET="/24"
 usage() {
 echo "Usage: $0 [OPTIONS] <container_name>"
     echo "Options:"
-    echo "  -i (IP)      Set custom IP"
-    echo "  -c (CPU)     Set CPU cores"
+    echo "  -i (IP)      Set custom IP eg 10.95.1.11"
+    echo "  -c (CPU)     Set CPU cores eg 8"
     echo "  -m (RAM)     Set RAM limit eg 32GB"
     echo "  -s (Disk)    Set Disk limit eg 900GB"
     echo "  -g           Enable MIG GPU"
-    echo "  -n           Enable user.nogpudetach. Set to true with this, defaults to false."
+    echo "  -n           Set containers user.nogpudetach key to true, defaults to false."
     exit 1
 }
 
