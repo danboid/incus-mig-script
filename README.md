@@ -20,13 +20,18 @@ When you are creating a container that will use a MIG GPU that you don't want to
 
 gpu-stats.py can be run to generate NVIDIA GPU stat log files using nvitop for all active MIG and non-MIG enabled GPUs.
 
-* 1. Create the virtual environment
- python3 -m venv /root/gpu-env
+* Create the virtual environment
+```
+python3 -m venv /root/gpu-env
+```
 
-* 2. Install nvitop specifically into that environment
- /root/gpu-env/bin/pip install nvitop
-
-* 3. Run your script using the environment's python
- /root/gpu-env/bin/python3 /root/gpu-env/bin/gpu-stats.py
+* Install nvitop specifically into that environment
+```
+/root/gpu-env/bin/pip install nvitop
+```
+* Run your script using the environment's python
+```
+/root/gpu-env/bin/python3 /root/gpu-env/bin/gpu-stats.py
+```
 
  Adjust that last path to point to wherever you copied gpu-stats.py.
