@@ -35,3 +35,13 @@ python3 -m venv /root/gpu-env
 ```
 
  Adjust that last path to point to wherever you copied gpu-stats.py.
+ 
+## incus logging
+ 
+The incus documentation [recommends setting up a Prometheus server](https://linuxcontainers.org/incus/docs/main/metrics/) for monitoring incus metrics but if you don't need to capture every incus metric or you don't have the resources to also run a Prometheus server you could instead create a root cron job like this:
+ 
+```
+* * * * * /usr/bin/incus list status=running -f csv -c n4Dmu,devices:gpu0.mig.uuid,devices:gpu0.pci | /usr/bin/awk -v ts="$(date '+%Y-%m-%d %H:%M:%S')" '{ print ts "," $0 }' >> /var/log/incus/incus-stats.log
+```
+
+This wil log the memory, CPU, used disk space and IP address of all running incus containers. It will also log either the MIG UUID or PCI ID if a gpu is attached to a container as device ID gpu0.
