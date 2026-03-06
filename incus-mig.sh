@@ -1,7 +1,13 @@
 #!/bin/bash
 
-# A script to automate the creation of Incus Ubuntu containers using NVIDIA MIG GPUs.
+# A script to automate the creation of Incus Ubuntu containers with optional attaching of NVIDIA GPUs.
 # by Dan MacDonald
+
+# Ensure dependencies exist
+if ! command -v pwgen &> /dev/null; then
+    echo "Error: 'pwgen' is not installed. Please run: sudo apt install pwgen"
+    exit 1
+fi
 
 # Default Values
 OS_IMAGE="images:ubuntu/24.04"
@@ -9,6 +15,7 @@ CPU_LIMIT="8"
 RAM_LIMIT="32GB"
 DISK_LIMIT="900GB"
 MIG_ENABLED=false
+PASSTHROUGH_PCI="01:00.0"
 CUSTOM_IP=""
 NO_GPU_DETACH="false"
 
@@ -21,24 +28,26 @@ DNS="146.87.174.121"
 SUBNET="/24"
 
 usage() {
-echo "Usage: $0 [OPTIONS] <container_name>"
+    echo "Usage: $0 [OPTIONS] <container_name>"
     echo "Options:"
     echo "  -i (IP)      Set custom IP eg 10.95.1.11"
     echo "  -c (CPU)     Set CPU cores eg 8"
     echo "  -m (RAM)     Set RAM limit eg 32GB"
     echo "  -s (Disk)    Set Disk limit eg 900GB"
-    echo "  -g           Enable MIG GPU"
-    echo "  -n           Set containers user.nogpudetach key to true, defaults to false."
+    echo "  -g           Enable MIG GPU (Auto-selects free instance)"
+    echo "  -G (PCI)     Enable PCI Passthrough GPU eg 01:00.0"
+    echo "  -n           Set user.nogpudetach to true (default: false)"
     exit 1
 }
 
-while getopts "i:c:m:s:gn" opt; do
+while getopts "i:c:m:s:gG:n" opt; do
     case $opt in
         i) CUSTOM_IP=$OPTARG ;;
         c) CPU_LIMIT=$OPTARG ;;
         m) RAM_LIMIT=$OPTARG ;;
         s) DISK_LIMIT=$OPTARG ;;
         g) MIG_ENABLED=true ;;
+        G) PASSTHROUGH_PCI=$OPTARG ;;
         n) NO_GPU_DETACH="true" ;;
         *) usage ;;
     esac
@@ -48,6 +57,11 @@ shift $((OPTIND-1))
 CONTAINER_NAME=$1
 
 [ -z "$CONTAINER_NAME" ] && usage
+
+if [ "$MIG_ENABLED" = true ] && [ -n "$PASSTHROUGH_PCI" ]; then
+    echo "Error: Cannot use both -g (MIG) and -G (Passthrough) together."
+    exit 1
+fi
 
 if incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
     echo "Error: Container '$CONTAINER_NAME' already exists."
@@ -61,68 +75,37 @@ if [ "$MIG_ENABLED" = true ]; then
     echo "Status: Scanning for available MIG devices..."
     ALL_MIG_UUIDS=$(nvidia-smi -L | grep -o "MIG-[a-f0-9-]\{36\}")
     USED_MIGS=$(incus list -f compact -c n,devices:gpu0.mig.uuid | grep -o "MIG-[a-f0-9-]\{36\}")
-    
+
     for MIG_UUID in $ALL_MIG_UUIDS; do
         if ! echo "$USED_MIGS" | grep -q "$MIG_UUID"; then
             SELECTED_MIG_UUID=$MIG_UUID
-            
-            # Try 1: Query by UUID directly
             RAW_PCI=$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader,nounits -i "$SELECTED_MIG_UUID" 2>/dev/null | grep -v "No devices")
-            
-            # Try 2: Fallback to first available physical GPU's PCI ID if UUID query fails
-            if [ -z "$RAW_PCI" ]; then
-                RAW_PCI=$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader,nounits | head -n 1)
-            fi
-
-            # Clean the string: strip '00000000:' or '0000:' and any whitespace
+            [ -z "$RAW_PCI" ] && RAW_PCI=$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader,nounits | head -n 1)
             CLEAN_PCI=$(echo "$RAW_PCI" | sed -E 's/^[0-9a-fA-F]{4,8}:?//' | tr -d '[:space:]')
-            
-            # Re-format to the standard 0000:XX:XX.X
             SELECTED_PCI_ID="0000:$CLEAN_PCI"
-            
-            # Sanity check: Ensure it matches a PCI pattern (e.g., 0000:01:00.0)
-            if [[ ! "$SELECTED_PCI_ID" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$ ]]; then
-                echo "Warning: Could not determine a valid PCI ID for $MIG_UUID. Trying next..."
-                continue
-            fi
-
-            echo "Status: Selected MIG $SELECTED_MIG_UUID on PCI $SELECTED_PCI_ID"
             break
         fi
     done
-    [ -z "$SELECTED_MIG_UUID" ] && { echo "Error: No free MIG GPUs or PCI detection failed."; exit 1; }
+    [ -z "$SELECTED_MIG_UUID" ] && { echo "Error: No free MIG GPUs found."; exit 1; }
 fi
 
-# --- IP & PASSWORD ---
+# --- IP CALCULATION ---
 if [ -z "$CUSTOM_IP" ]; then
-    echo "Status: Calculating next available IP in the 10.95.1.x range..."
-
     LAST_IP=$(incus list -f compact | grep -oE "\b10\.95\.1\.[0-9]{1,3}\b" | sort -t. -k4,4n | tail -n 1)
-
-    if [ -z "$LAST_IP" ]; then
-        # Fallback if no containers in this range exist yet
-        TARGET_IP="10.95.1.2"
-    else
-        # Extract the 4th octet, increment it, and rebuild the IP
-        BASE_IP="10.95.1"
+    TARGET_IP="10.95.1.2"
+    if [ -n "$LAST_IP" ]; then
         LAST_OCTET=$(echo "$LAST_IP" | cut -d. -f4)
-        NEXT_OCTET=$((LAST_OCTET + 1))
-
-        if [ "$NEXT_OCTET" -ge 254 ]; then
-            echo "Error: IP range 10.95.1.x is full!"
-            exit 1
-        fi
-
-        TARGET_IP="$BASE_IP.$NEXT_OCTET"
+        TARGET_IP="10.95.1.$((LAST_OCTET + 1))"
     fi
 else
     TARGET_IP=$CUSTOM_IP
 fi
+
 ROOT_PASSWORD=$(pwgen -s 16 1)
 
+# --- EXECUTION ---
 echo "--- Initializing: $CONTAINER_NAME ---"
 
-# 1. Launch & Snapshot Configuration
 LAUNCH_FLAGS=(
     "--config" "limits.cpu=$CPU_LIMIT"
     "--config" "limits.memory=$RAM_LIMIT"
@@ -133,61 +116,68 @@ LAUNCH_FLAGS=(
     "--config" "user.expiry=$EXPIRY_DATE"
     "--config" "user.nogpudetach=$NO_GPU_DETACH"
 )
-[ "$MIG_ENABLED" = true ] && LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
+
+if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
+    LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
+fi
 
 incus launch "$OS_IMAGE" "$CONTAINER_NAME" "${LAUNCH_FLAGS[@]}"
 incus config device override "$CONTAINER_NAME" root size="$DISK_LIMIT"
 
-# 2. GPU Attachment
+# --- GPU ATTACHMENT ---
 if [ "$MIG_ENABLED" = true ]; then
     echo "Status: Attaching MIG device..."
     incus stop "$CONTAINER_NAME"
-    incus config device add "$CONTAINER_NAME" gpu0 gpu \
-        gputype=mig \
-        mig.uuid="$SELECTED_MIG_UUID" \
-        pci="$SELECTED_PCI_ID"
+    incus config device add "$CONTAINER_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
     incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
     incus start "$CONTAINER_NAME"
+elif [ -n "$PASSTHROUGH_PCI" ]; then
+    echo "Status: Attaching PCI Passthrough GPU ($PASSTHROUGH_PCI)..."
+    incus config device add "$CONTAINER_NAME" gpu0 gpu pci="$PASSTHROUGH_PCI"
+    incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
 fi
 
-# 3. Networking Setup
-CAT_NETPLAN=$(cat <<EOF
-network:
-  version: 2
-  ethernets:
-    eth0:
-      addresses: [$TARGET_IP$SUBNET]
-      routes: [{to: default, via: $GATEWAY}]
-      nameservers: {addresses: [$DNS]}
-      dhcp4: false
-EOF
-)
-echo "$CAT_NETPLAN" | incus file push - "$CONTAINER_NAME/etc/netplan/10-lxc.yaml"
+# --- NETWORKING & SSH ---
+echo "Status: Configuring Networking & SSH..."
+printf "network:\n  version: 2\n  ethernets:\n    eth0:\n      addresses: [%s%s]\n      routes: [{to: default, via: %s}]\n      nameservers: {addresses: [%s]}\n      dhcp4: false" \
+    "$TARGET_IP" "$SUBNET" "$GATEWAY" "$DNS" | incus file push - "$CONTAINER_NAME/etc/netplan/10-lxc.yaml"
 
 for i in {1..5}; do
-    echo "Status: Applying Netplan (Attempt $i)..."
-    if incus exec "$CONTAINER_NAME" -- netplan apply >/dev/null 2>&1; then
-        break
-    else
-        sleep 3
-    fi
+    incus exec "$CONTAINER_NAME" -- netplan apply >/dev/null 2>&1 && break || sleep 3
 done
 
-# 4. SSH & Root Setup
-echo "Status: Installing OpenSSH and configuring root access..."
 incus exec "$CONTAINER_NAME" -- sh -c "apt update && apt install -y openssh-server"
-incus exec "$CONTAINER_NAME" -- sh -c "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
-incus exec "$CONTAINER_NAME" -- sh -c "echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config"
+incus exec "$CONTAINER_NAME" -- sh -c "sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
 incus exec "$CONTAINER_NAME" -- systemctl restart ssh
 echo "root:$ROOT_PASSWORD" | incus exec "$CONTAINER_NAME" -- chpasswd
+incus exec "$CONTAINER_NAME" -- apt upgrade -y
 
-# 5. Final Upgrade
-incus exec "$CONTAINER_NAME" -- sh -c "apt upgrade -y"
+# --- PASSTHROUGH POST-INSTALL (CUDA TOOLKIT) ---
+if [ -n "$PASSTHROUGH_PCI" ]; then
+    echo "Status: Detected Passthrough. Preparing for CUDA Toolkit installation..."
 
+    # 1. Disable nvidia.runtime temporarily so apt doesn't hit "Invalid cross-device link"
+    # This unmounts the host libraries so we can install the toolkit headers/compilers
+    incus config set "$CONTAINER_NAME" nvidia.runtime false
+    incus restart "$CONTAINER_NAME"
+
+    echo "Status: Installing CUDA Toolkit (compilers/headers only)..."
+    # We use --no-install-recommends to avoid pulling in the actual driver/kernel modules
+    # We also ignore the libraries that Incus provides at runtime
+    incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt update"
+    incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends nvidia-cuda-toolkit"
+
+    # 2. Re-enable nvidia.runtime
+    # Now that the toolkit is installed, Incus will overlay the host's .so files back
+    # over the container's filesystem when it starts.
+    echo "Status: Re-enabling NVIDIA runtime..."
+    incus config set "$CONTAINER_NAME" nvidia.runtime true
+    incus restart "$CONTAINER_NAME"
+fi
 echo "------------------------------------------------"
 echo "Success: $CONTAINER_NAME is online at $TARGET_IP"
-echo "EXPIRY DATE: $EXPIRY_DATE"
-echo "NO GPU DETACH: $NO_GPU_DETACH"
-[ "$MIG_ENABLED" = true ] && echo "GPU Attached: $SELECTED_MIG_UUID (PCI $SELECTED_PCI_ID)"
-echo "ROOT PASSWORD: $ROOT_PASSWORD"
+echo "EXPIRY: $EXPIRY_DATE | NOGPUDETACH: $NO_GPU_DETACH"
+[ "$MIG_ENABLED" = true ] && echo "MIG: $SELECTED_MIG_UUID"
+[ -n "$PASSTHROUGH_PCI" ] && echo "PCI: $PASSTHROUGH_PCI (Matched to Host v$HOST_VERSION)"
+echo "ROOT PASS: $ROOT_PASSWORD"
 echo "------------------------------------------------"
