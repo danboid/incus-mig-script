@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# A script to automate the creation of Incus Ubuntu containers with optional attaching of NVIDIA GPUs.
+# A script to automate the creation of Incus Ubuntu containers with optional attaching of a NVIDIA MIG or PCI GPU.
+
 # by Dan MacDonald
 
 # Ensure dependencies exist
@@ -15,9 +16,10 @@ CPU_LIMIT="8"
 RAM_LIMIT="32GB"
 DISK_LIMIT="900GB"
 MIG_ENABLED=false
-PASSTHROUGH_PCI="01:00.0"
+PASSTHROUGH_PCI=""
 CUSTOM_IP=""
 NO_GPU_DETACH="false"
+FULL_CUDA_INSTALL=false
 
 # Calculate Expiry Date (exactly 2 months from today)
 EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
@@ -37,10 +39,11 @@ usage() {
     echo "  -g           Enable MIG GPU (Auto-selects free instance)"
     echo "  -G (PCI)     Enable PCI Passthrough GPU eg 01:00.0"
     echo "  -n           Set user.nogpudetach to true (default: false)"
+    echo "  -f           Full CUDA toolkit install (compilers/headers)"
     exit 1
 }
 
-while getopts "i:c:m:s:gG:n" opt; do
+while getopts "i:c:m:s:gG:nf" opt; do
     case $opt in
         i) CUSTOM_IP=$OPTARG ;;
         c) CPU_LIMIT=$OPTARG ;;
@@ -49,6 +52,7 @@ while getopts "i:c:m:s:gG:n" opt; do
         g) MIG_ENABLED=true ;;
         G) PASSTHROUGH_PCI=$OPTARG ;;
         n) NO_GPU_DETACH="true" ;;
+        f) FULL_CUDA_INSTALL=true ;;
         *) usage ;;
     esac
 done
@@ -152,32 +156,45 @@ incus exec "$CONTAINER_NAME" -- systemctl restart ssh
 echo "root:$ROOT_PASSWORD" | incus exec "$CONTAINER_NAME" -- chpasswd
 incus exec "$CONTAINER_NAME" -- apt upgrade -y
 
-# --- PASSTHROUGH POST-INSTALL (CUDA TOOLKIT) ---
-if [ -n "$PASSTHROUGH_PCI" ]; then
-    echo "Status: Detected Passthrough. Preparing for CUDA Toolkit installation..."
+# --- FULL CUDA TOOLKIT INSTALL ---
+if [ "$FULL_CUDA_INSTALL" = true ]; then
+    echo "Status: Flag -f detected. Preparing for CUDA Toolkit installation..."
 
-    # 1. Disable nvidia.runtime temporarily so apt doesn't hit "Invalid cross-device link"
-    # This unmounts the host libraries so we can install the toolkit headers/compilers
+    # 1. STOP container first to allow config/device changes
+    incus stop "$CONTAINER_NAME"
+
+    # 2. Handle device/runtime removal based on type
+    if [ "$MIG_ENABLED" = true ]; then
+        incus config device remove "$CONTAINER_NAME" gpu0
+    fi
     incus config set "$CONTAINER_NAME" nvidia.runtime false
-    incus restart "$CONTAINER_NAME"
+
+    # 3. START container for installation
+    incus start "$CONTAINER_NAME"
 
     echo "Status: Installing CUDA Toolkit (compilers/headers only)..."
-    # We use --no-install-recommends to avoid pulling in the actual driver/kernel modules
-    # We also ignore the libraries that Incus provides at runtime
     incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt update"
     incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends nvidia-cuda-toolkit"
 
-    # 2. Re-enable nvidia.runtime
-    # Now that the toolkit is installed, Incus will overlay the host's .so files back
-    # over the container's filesystem when it starts.
-    echo "Status: Re-enabling NVIDIA runtime..."
+    # 4. STOP to restore GPU configuration
+    echo "Status: Restoring NVIDIA runtime and GPU..."
+    incus stop "$CONTAINER_NAME"
     incus config set "$CONTAINER_NAME" nvidia.runtime true
-    incus restart "$CONTAINER_NAME"
+
+    if [ "$MIG_ENABLED" = true ]; then
+        incus config device add "$CONTAINER_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
+        incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
+    fi
+
+    # 5. FINAL START
+    incus start "$CONTAINER_NAME"
 fi
+
 echo "------------------------------------------------"
 echo "Success: $CONTAINER_NAME is online at $TARGET_IP"
 echo "EXPIRY: $EXPIRY_DATE | NOGPUDETACH: $NO_GPU_DETACH"
 [ "$MIG_ENABLED" = true ] && echo "MIG: $SELECTED_MIG_UUID"
-[ -n "$PASSTHROUGH_PCI" ] && echo "PCI: $PASSTHROUGH_PCI (Matched to Host v$HOST_VERSION)"
+[ -n "$PASSTHROUGH_PCI" ] && echo "PCI: $PASSTHROUGH_PCI"
+[ "$FULL_CUDA_INSTALL" = true ] && echo "CUDA: Full Toolkit Installed"
 echo "ROOT PASS: $ROOT_PASSWORD"
 echo "------------------------------------------------"
