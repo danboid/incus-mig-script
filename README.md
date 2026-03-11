@@ -1,12 +1,12 @@
 # incus-mig-script
 
-A script to automate the creation of incus Ubuntu containers using NVIDIA MIG GPUs.
+A script to automate the creation of incus Ubuntu containers using NVIDIA GPUs, optionally attaching a NVIDIA MIG or a full NVIDIA PCI express attached GPU.
 
-This script requires that you have incus installed and configured as well as the CUDA toolkit and that you have configured at least one MIG device. It uses pwgen to generate passwords.
+This script requires that you have incus installed and configured. You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using mig-manager) before running the script if you wish to use the -g option. This script uses pwgen to generate passwords.
 
 You will need to adjust the Network Default variables to match your network before running this script. In order for the auto IP address assignment code to work properly, all of your containers must be running when you create a new container to avoid IP address conflicts, or at least you should start the container that has the highest value for its last octet. incus-mig.sh also configures snapshots (one every 12 hours), installs openssh-server and configures a password for the root user.
 
-incus-cleanup.sh should be configured to be run via a daily root cron job to disable and delete old containers.
+incus-cleanup.sh should be configured to be run via a daily root cron job to disable and delete old containers. gpu-stats.py can be run via cron to log NVIDIA GPU activity via nvitop.
 
 Do not use dots or any other punctuation for container names.
 
