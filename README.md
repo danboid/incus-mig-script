@@ -45,3 +45,23 @@ The incus documentation [recommends setting up a Prometheus server](https://linu
 ```
 
 This wil log the memory, CPU, used disk space and IP address of all running incus containers. It will also log either the MIG UUID or PCI ID if a gpu is attached to a container as device ID gpu0.
+
+## Example commands
+
+Create a Ubuntu incus container called Jim-Smith with no GPU attached and using the default spec defined within the script (900GB HD, 32GB RAM and 8 CPU cores):
+
+```
+incus-mig.sh Jim-Smith
+```
+
+Create a container using the default spec called Tim-Smith but with a MIG GPU attached:
+
+```
+incus-mig.sh -g Tim-Smith
+```
+
+Create a container called Dan-MacDonald with 128GB RAM, 16 CPU cores and the full NVIDIA GPU in the first PCI express slot passed through to the container:
+
+```
+incus-mig.sh -c 16 -m 128GB -G 01:00.0 Dan-MacDonald
+```
