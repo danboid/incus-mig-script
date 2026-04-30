@@ -2,6 +2,8 @@
 
 # A script to automate the creation of Incus Ubuntu containers with optional attaching of a NVIDIA MIG or PCI GPU.
 
+# This script depends upon the default incus profile being configured to use a managed bridge created by incus.
+
 # by Dan MacDonald
 
 # Ensure dependencies exist
@@ -23,11 +25,6 @@ FULL_CUDA_INSTALL=false
 
 # Calculate Expiry Date (exactly 2 months from today)
 EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
-
-# Network Defaults
-GATEWAY="10.95.1.254"
-DNS="146.87.174.121"
-SUBNET="/24"
 
 usage() {
     echo "Usage: $0 [OPTIONS] <container_name>"
@@ -93,14 +90,44 @@ if [ "$MIG_ENABLED" = true ]; then
     [ -z "$SELECTED_MIG_UUID" ] && { echo "Error: No free MIG GPUs found."; exit 1; }
 fi
 
-# --- IP CALCULATION ---
+# --- IP CALCULATION & NETWORK DEDUCTION ---
+echo "Status: Determining IP Address..."
+# Get list of IPs currently assigned to eth0
+USED_IPS=$(incus list -c devices:eth0.ipv4.address --format csv | grep -v '^$')
+
 if [ -z "$CUSTOM_IP" ]; then
-    LAST_IP=$(incus list -f compact | grep -oE "\b10\.95\.1\.[0-9]{1,3}\b" | sort -t. -k4,4n | tail -n 1)
-    TARGET_IP="10.95.1.2"
-    if [ -n "$LAST_IP" ]; then
-        LAST_OCTET=$(echo "$LAST_IP" | cut -d. -f4)
-        TARGET_IP="10.95.1.$((LAST_OCTET + 1))"
+    # Deduce prefix from the first IP found, default to 10.95.1 if none found
+    FIRST_IP=$(echo "$USED_IPS" | head -n 1)
+    if [ -n "$FIRST_IP" ]; then
+        PREFIX=$(echo "$FIRST_IP" | cut -d. -f1-3)
+    else
+        PREFIX="10.95.1"
     fi
+
+    # Find highest octet
+    LAST_OCTET=$(echo "$USED_IPS" | cut -d. -f4 | sort -n | tail -n 1)
+    [ -z "$LAST_OCTET" ] && LAST_OCTET=1
+
+    # Iterate to find an IP that is both not in Incus list and not pingable
+    FOUND_IP=false
+    CURRENT_OCTET=$((LAST_OCTET + 1))
+
+    while [ "$FOUND_IP" = false ]; do
+        TRY_IP="$PREFIX.$CURRENT_OCTET"
+
+        # Check if IP is in the used list OR responds to ping
+        if ! echo "$USED_IPS" | grep -q "$TRY_IP" && ! ping -c 1 -W 1 "$TRY_IP" >/dev/null 2>&1; then
+            TARGET_IP=$TRY_IP
+            FOUND_IP=true
+        else
+            CURRENT_OCTET=$((CURRENT_OCTET + 1))
+        fi
+
+        if [ "$CURRENT_OCTET" -gt 254 ]; then
+            echo "Error: Could not find a free IP in the $PREFIX.x range."
+            exit 1
+        fi
+    done
 else
     TARGET_IP=$CUSTOM_IP
 fi
@@ -108,7 +135,7 @@ fi
 ROOT_PASSWORD=$(pwgen -s 16 1)
 
 # --- EXECUTION ---
-echo "--- Initializing: $CONTAINER_NAME ---"
+echo "--- Initializing: $CONTAINER_NAME ($TARGET_IP) ---"
 
 LAUNCH_FLAGS=(
     "--config" "limits.cpu=$CPU_LIMIT"
@@ -125,8 +152,19 @@ if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
     LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
 fi
 
+# Launch the container
 incus launch "$OS_IMAGE" "$CONTAINER_NAME" "${LAUNCH_FLAGS[@]}"
+
+# Apply Resource Limits
 incus config device override "$CONTAINER_NAME" root size="$DISK_LIMIT"
+
+# Apply Network Reservation (DHCP Static Lease)
+# We override eth0 to set the IPv4 address at the host/bridge level
+incus config device override "$CONTAINER_NAME" eth0 ipv4.address="$TARGET_IP"
+
+# Restart to apply the IP assignment reliably
+echo "Status: Applying Network configuration..."
+incus restart "$CONTAINER_NAME"
 
 # --- GPU ATTACHMENT ---
 if [ "$MIG_ENABLED" = true ]; then
@@ -141,15 +179,10 @@ elif [ -n "$PASSTHROUGH_PCI" ]; then
     incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
 fi
 
-# --- NETWORKING & SSH ---
-echo "Status: Configuring Networking & SSH..."
-printf "network:\n  version: 2\n  ethernets:\n    eth0:\n      addresses: [%s%s]\n      routes: [{to: default, via: %s}]\n      nameservers: {addresses: [%s]}\n      dhcp4: false" \
-    "$TARGET_IP" "$SUBNET" "$GATEWAY" "$DNS" | incus file push - "$CONTAINER_NAME/etc/netplan/10-lxc.yaml"
-
-for i in {1..5}; do
-    incus exec "$CONTAINER_NAME" -- netplan apply >/dev/null 2>&1 && break || sleep 3
-done
-
+# --- SSH SETUP ---
+echo "Status: Configuring SSH..."
+# Wait for network to be ready inside
+sleep 2
 incus exec "$CONTAINER_NAME" -- sh -c "apt update && apt install -y openssh-server"
 incus exec "$CONTAINER_NAME" -- sh -c "sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
 incus exec "$CONTAINER_NAME" -- systemctl restart ssh
@@ -159,34 +192,23 @@ incus exec "$CONTAINER_NAME" -- apt upgrade -y
 # --- FULL CUDA TOOLKIT INSTALL ---
 if [ "$FULL_CUDA_INSTALL" = true ]; then
     echo "Status: Flag -f detected. Preparing for CUDA Toolkit installation..."
-
-    # 1. STOP container first to allow config/device changes
     incus stop "$CONTAINER_NAME"
-
-    # 2. Handle device/runtime removal based on type
     if [ "$MIG_ENABLED" = true ]; then
         incus config device remove "$CONTAINER_NAME" gpu0
     fi
     incus config set "$CONTAINER_NAME" nvidia.runtime false
-
-    # 3. START container for installation
     incus start "$CONTAINER_NAME"
 
     echo "Status: Installing CUDA Toolkit (compilers/headers only)..."
     incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt update"
     incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends nvidia-cuda-toolkit"
 
-    # 4. STOP to restore GPU configuration
-    echo "Status: Restoring NVIDIA runtime and GPU..."
     incus stop "$CONTAINER_NAME"
     incus config set "$CONTAINER_NAME" nvidia.runtime true
-
     if [ "$MIG_ENABLED" = true ]; then
         incus config device add "$CONTAINER_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
         incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
     fi
-
-    # 5. FINAL START
     incus start "$CONTAINER_NAME"
 fi
 
