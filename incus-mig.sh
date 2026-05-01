@@ -29,19 +29,28 @@ EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
 usage() {
     echo "Usage: $0 [OPTIONS] <container_name>"
     echo "Options:"
+    echo "  -d (Distro)  Set OS: u2404 (Ubuntu 24.04), u2604 (Ubuntu 26.04), d13 (Debian 13)"
     echo "  -i (IP)      Set custom IP eg 10.95.1.11"
     echo "  -c (CPU)     Set CPU cores eg 8"
     echo "  -m (RAM)     Set RAM limit eg 32GB"
-    echo "  -s (Disk)    Set Disk limit eg 900GB"
-    echo "  -g           Enable MIG GPU (Auto-selects free instance)"
-    echo "  -G (PCI)     Enable PCI Passthrough GPU eg 01:00.0"
+    echo "  -s (Storage) Set Disk limit eg 900GB"
+    echo "  -g (gPU)     Enable MIG GPU (Auto-selects free instance)"
+    echo "  -G (GPU)     Enable PCI Passthrough GPU eg 01:00.0"
     echo "  -n           Set user.nogpudetach to true (default: false)"
     echo "  -f           Full CUDA toolkit install (compilers/headers)"
     exit 1
 }
 
-while getopts "i:c:m:s:gG:nf" opt; do
+while getopts "d:i:c:m:s:gG:nf" opt; do
     case $opt in
+        d)
+            case ${OPTARG,,} in # Convert to lowercase for easier matching
+                u2404) OS_IMAGE="images:ubuntu/24.04" ;;
+                u2604) OS_IMAGE="images:ubuntu/26.04" ;;
+                d13)   OS_IMAGE="images:debian/13" ;;
+                *) echo "Error: Invalid distro '$OPTARG'. Use u2404, u2604, or d13."; exit 1 ;;
+            esac
+            ;;
         i) CUSTOM_IP=$OPTARG ;;
         c) CPU_LIMIT=$OPTARG ;;
         m) RAM_LIMIT=$OPTARG ;;
@@ -135,7 +144,7 @@ fi
 ROOT_PASSWORD=$(pwgen -s 16 1)
 
 # --- EXECUTION ---
-echo "--- Initializing: $CONTAINER_NAME ($TARGET_IP) ---"
+echo "--- Initializing: $CONTAINER_NAME ($TARGET_IP) using $OS_IMAGE ---"
 
 LAUNCH_FLAGS=(
     "--config" "limits.cpu=$CPU_LIMIT"
@@ -159,7 +168,6 @@ incus launch "$OS_IMAGE" "$CONTAINER_NAME" "${LAUNCH_FLAGS[@]}"
 incus config device override "$CONTAINER_NAME" root size="$DISK_LIMIT"
 
 # Apply Network Reservation (DHCP Static Lease)
-# We override eth0 to set the IPv4 address at the host/bridge level
 incus config device override "$CONTAINER_NAME" eth0 ipv4.address="$TARGET_IP"
 
 # Restart to apply the IP assignment reliably
@@ -214,6 +222,7 @@ fi
 
 echo "------------------------------------------------"
 echo "Success: $CONTAINER_NAME is online at $TARGET_IP"
+echo "IMAGE: $OS_IMAGE"
 echo "EXPIRY: $EXPIRY_DATE | NOGPUDETACH: $NO_GPU_DETACH"
 [ "$MIG_ENABLED" = true ] && echo "MIG: $SELECTED_MIG_UUID"
 [ -n "$PASSTHROUGH_PCI" ] && echo "PCI: $PASSTHROUGH_PCI"
