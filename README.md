@@ -1,6 +1,6 @@
 # incus-mig-script
 
-Automates the creation of incus Ubuntu containers using NVIDIA GPUs, optionally attaching a NVIDIA MIG or a full NVIDIA PCI express attached GPU.
+Automates the creation of incus Debian and Ubuntu containers using NVIDIA GPUs, optionally attaching a NVIDIA MIG or a full NVIDIA PCI express attached GPU.
 
 This script requires that your incus profile is connected to a managed bridge created and run by incus. You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using mig-manager) before running the script if you wish to use the -g option. You should be able to use -G without any MIG.
 
@@ -54,10 +54,10 @@ Create a Ubuntu incus container called Jim-Smith with no GPU attached and using 
 incus-mig.sh Jim-Smith
 ```
 
-Create a container using the default spec called Tim-Smith but with a MIG GPU attached:
+Create a Debian 13 container using the default spec called Tim-Smith with a MIG GPU attached:
 
 ```
-incus-mig.sh -g Tim-Smith
+incus-mig.sh -d d13 -g Tim-Smith
 ```
 
 Create a container called Dan-MacDonald with 128GB RAM, 16 CPU cores and the full NVIDIA GPU in the first PCI express slot passed through to the container:
