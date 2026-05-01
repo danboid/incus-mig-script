@@ -1,8 +1,10 @@
-# incus-mig-script
+# incus-mig
 
-Automates the creation of incus Debian and Ubuntu containers using NVIDIA GPUs, optionally attaching a NVIDIA MIG or a full NVIDIA PCI express attached GPU.
+incus-mig automates the creation of Debian and Ubuntu incus containers, focusing on making it easy to attach a NVIDIA MIG or a full NVIDIA PCI express GPU although doing that is optional.
 
-This script requires that your incus profile is connected to a managed bridge created and run by incus. You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using mig-manager) before running the script if you wish to use the -g option. You should be able to use -G without any MIG.
+This script requires root access and has to be run on an incus server that has been configured to use an incus managed network bridge interface, created and managed (DHCP and DNS) by incus.
+
+You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using mig-manager) before running the script if you wish to use the -g option to attach a MIG GPU. You should be able to use -G without any MIG, to do PCIe passthrough of a full GPU.
 
 incus-mig.sh also configures incus snapshots (one every 12 hours), installs openssh-server and configures a password for the root user.
 
