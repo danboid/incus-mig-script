@@ -14,9 +14,9 @@ Do not use dots or any other punctuation for container names.
 
 ## Using the -n (NO_GPU_DETACH) option
 
-This script presumes that all of your free MIG GPUs have the same configuration hence it just attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those GPUs to containers before running this script with the -g option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use the -g option.
+This script presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g.
 
-When you are creating a container that will use a MIG GPU that you don't want to be auto-assigned by the incus-mig script, you should create the container using -n (NO_GPU_DETACH) and without using the -g arguments and then manually attach the GPU to the container. Using -n will set NO_GPU_DETACH to true and it will prevent the cleanup script from detaching the GPU from the container when it gets disabled on its expiry date and prevent it being added into the pool of available GPUs. By default, the cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers and it does not automatically delete containers using NO_GPU_DETACH.
+When you are creating a container that will use a MIG GPU that you don't want to be auto-assigned by the incus-mig script using -m , you should also use -n (NO_GPU_DETACH). Using -n will set the containers NO_GPU_DETACH option to true and will prevent the cleanup script from detaching the GPU from the container when it gets disabled on its expiry date and prevent it being added into the pool of available GPUs. The cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers but it does not automatically delete containers that have NO_GPU_DETACH set to true.
 
 ## gpu-stats.py
 
@@ -65,5 +65,5 @@ incus-mig.sh -d d13 -g Tim-Smith
 Create a container called Dan-MacDonald with 128GB RAM, 16 CPU cores and the full NVIDIA GPU in the first PCI express slot passed through to the container:
 
 ```
-incus-mig.sh -c 16 -m 128GB -G 01:00.0 Dan-MacDonald
+incus-mig.sh -c 16 -r 128GB -G 01:00.0 Dan-MacDonald
 ```
