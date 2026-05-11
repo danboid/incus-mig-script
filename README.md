@@ -68,6 +68,8 @@ When you are creating a container that will use a MIG GPU that you don't want to
 
 The cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers but it does not automatically delete containers that have NO_GPU_DETACH set to true.
 
+If you DIDN'T use the -n option when creating Jim's container, you could run:
+
 ```
 incus config set Jim-Smith user.nogpudetach true
 ```
@@ -77,6 +79,22 @@ To check the nogpudetach config option:
 ```
 incus config get Jim-Smith user.nogpudetach
 ```
+
+To change Dan's CPU limit to 32 CPU cores:
+
+```
+incus config set Dan-MacDonald limits.cpu 32
+```
+
+To change Jim's RAM limit to 64GB:
+
+```
+incus config set Jim-Smith limits.memory 64GB
+```
+
+The last two are standard incus commands I've included just for convenience and as useful, commonly used examples.
+
+This is the end of the incus-mig section of the README. What follows are notes on the other scripts in this repo.
 
 ## gpu-stats.py
 
