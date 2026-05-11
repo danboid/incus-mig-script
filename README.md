@@ -14,9 +14,9 @@ Do not use dots or any other punctuation for container names.
 
 ## incus-mig container creation commands
 
-Before running any of these commands, check and adjust the default values at the top of the script to whateve values best suit your incus server. Most of them can be set on the command line. Run **incus-mig.sg** without any options to see all of the command line options that incus-mig.sh has.
+Before running any of the following incus-mig commands, check and adjust the default values at the top of the script and adjust them to values suitable for new containers being created on your incus server. Most of them can be set on the command line. Run **incus-mig.sh** without any options to see all of the command line options that **incus-mig.sh** has.
 
-Create a Ubuntu incus container called **Jim-Smith** with no GPU attached and using the default spec defined within the script (900GB HD, 32GB RAM and 8 CPU cores):
+Create a Ubuntu (24.04) incus container called **Jim-Smith** with no GPU attached using the default spec defined within the script (900GB HD, 32GB RAM and 8 CPU cores):
 
 ```
 incus-mig.sh Jim-Smith
@@ -124,5 +124,5 @@ The incus documentation [recommends setting up a Prometheus server](https://linu
 * * * * * /usr/bin/incus list status=running -f csv -c n4Dmu,devices:gpu0.mig.uuid,devices:gpu0.pci | /usr/bin/awk -v ts="$(date '+%Y-%m-%d %H:%M:%S')" '{ print ts "," $0 }' >> /var/log/incus/incus-stats.log
 ```
 
-This wil log the memory, CPU, used disk space and IP address of all running incus containers. It will also log either the MIG UUID or PCI ID if a gpu is attached to a container as device ID gpu0.
+This will log the memory, CPU, used disk space and IP address of all running incus containers. It will also log either the MIG UUID or PCI ID if a gpu is attached to a container as device ID gpu0.
 
