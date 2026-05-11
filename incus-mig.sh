@@ -12,7 +12,7 @@ if ! command -v pwgen &> /dev/null; then
     exit 1
 fi
 
-# Default Values
+# Default values
 OS_IMAGE="images:ubuntu/24.04"
 CPU_LIMIT="8"
 RAM_LIMIT="32GB"
@@ -24,13 +24,13 @@ CUSTOM_IP=""
 NO_GPU_DETACH="false"
 FULL_CUDA_INSTALL=false
 
-# Calculate Expiry Date (exactly 2 months from today)
+# Calculate expiry date (exactly 2 months from today)
 EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
 
 usage() {
     echo "Usage: $0 [OPTIONS] <container_name>"
     echo "Options:"
-    echo "  -d (Distro)  Set OS: u2404, u2604, d13"
+    echo "  -d (Distro)  Set OS: u2404 (Ubuntu 24.04), u2604 (Ubuntu 26.04), d13 (Debian 13)"
     echo "  -i (IP)      Set custom IP eg 10.95.1.11"
     echo "  -c (CPU)     Set CPU cores eg 8"
     echo "  -r (RAM)     Set RAM limit eg 32GB"
@@ -38,7 +38,7 @@ usage() {
     echo "  -g           Enable MIG GPU (Auto-selects free instance)"
     echo "  -m (MIG ID)  Attach specific MIG GPU by UUID"
     echo "  -G (GPU)     Enable PCI Passthrough GPU eg 01:00.0"
-    echo "  -n           Set user.nogpudetach to true (use with -m)"
+    echo "  -n           Set user.nogpudetach to true (Defaults to false. Use with -m)"
     echo "  -f           Full CUDA toolkit install"
     exit 1
 }
@@ -133,6 +133,7 @@ if [ -z "$CUSTOM_IP" ]; then
 
     while [ "$FOUND_IP" = false ]; do
         TRY_IP="$PREFIX.$CURRENT_OCTET"
+        # Check if IP is in the used list OR responds to ping
         if ! echo "$USED_IPS" | grep -q "$TRY_IP" && ! ping -c 1 -W 1 "$TRY_IP" >/dev/null 2>&1; then
             TARGET_IP=$TRY_IP
             FOUND_IP=true
@@ -194,7 +195,7 @@ incus exec "$CONTAINER_NAME" -- systemctl restart ssh
 echo "root:$ROOT_PASSWORD" | incus exec "$CONTAINER_NAME" -- chpasswd
 incus exec "$CONTAINER_NAME" -- apt upgrade -y
 
-# --- FULL CUDA TOOLKIT INSTALL ---
+# --- FULL CUDA TOOLKIT INSTALL FOR CUDA DEV - WIP ---
 if [ "$FULL_CUDA_INSTALL" = true ]; then
     echo "Status: Flag -f detected. Installing CUDA Toolkit..."
     incus stop "$CONTAINER_NAME"
@@ -219,6 +220,6 @@ echo "IMAGE: $OS_IMAGE"
 echo "EXPIRY: $EXPIRY_DATE | NOGPUDETACH: $NO_GPU_DETACH"
 [ "$MIG_ENABLED" = true ] && echo "MIG: $SELECTED_MIG_UUID"
 [ -n "$PASSTHROUGH_PCI" ] && echo "PCI: $PASSTHROUGH_PCI"
-[ "$FULL_CUDA_INSTALL" = true ] && echo "CUDA: Full Toolkit Installed"
+[ "$FULL_CUDA_INSTALL" = true ] && echo "CUDA: Full toolkit installed"
 echo "ROOT PASS: $ROOT_PASSWORD"
 echo "------------------------------------------------"
