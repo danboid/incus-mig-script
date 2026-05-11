@@ -12,9 +12,9 @@ You must have the CUDA toolkit installed on the incus server and you need to hav
 
 Do not use dots or any other punctuation for container names.
 
-## Example incus-mig container creation commamds
+## incus-mig container creation commands
 
-Before running any of these examples commands, check and adjust the default values at the top of the script. Most of them can be set on the command line. Run **incus-mig.sg** without any options to see them all.
+Before running any of these commands, check and adjust the default values at the top of the script to whateve values best suit your incus server. Most of them can be set on the command line. Run **incus-mig.sg** without any options to see all of the command line options that incus-mig.sh has.
 
 Create a Ubuntu incus container called **Jim-Smith** with no GPU attached and using the default spec defined within the script (900GB HD, 32GB RAM and 8 CPU cores):
 
@@ -28,7 +28,7 @@ Create a Debian 13 container using the default spec called **Tim-Smith** with a 
 incus-mig.sh -d d13 -g Tim-Smith
 ```
 
-Create a container called **Dan-MacDonald** with 128GB RAM, 16 CPU cores and the full NVIDIA GPU in the first PCI express slot passed through to the container:
+Create a container called **Dan-MacDonald** with 128GB RAM, 16 CPU cores with the full NVIDIA GPU in the first PCI express slot passed through to the container:
 
 ```
 incus-mig.sh -c 16 -r 128GB -G 01:00.0 Dan-MacDonald
@@ -42,7 +42,7 @@ List all configured MIG GPUs whether attached to an incus container or not:
 nvidia-smi -L
 ```
 
-List all incus containers and any attached MIG GPI ids, if configured:
+List all incus containers and any attached MIG GPU ids, if configured:
 
 ```
 incus list -f compact -c n,devices:gpu0.mig.uuid
@@ -62,9 +62,11 @@ incus config set Tim-Smith user.expiry 2020-06-21
 
 ## Using the -n (NO_GPU_DETACH) option
 
-This script presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g to randomly assign a MIG GPU from the ones currentlty available.
+This script presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g to randomly assign a MIG GPU from the ones currently available.
 
-When you are creating a container that will use a MIG GPU that you don't want to be auto-assigned by the incus-mig script using -m , you should also use -n (NO_GPU_DETACH). Using -n will set the containers NO_GPU_DETACH option to true and will prevent the cleanup script from detaching the GPU from the container when it gets disabled on its expiry date and prevent it being added into the pool of available GPUs. The cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers but it does not automatically delete containers that have NO_GPU_DETACH set to true.
+When you are creating a container that will use a MIG GPU that you don't want to be auto-assigned by the incus-mig script using -m , you should also use -n (NO_GPU_DETACH). Using -n will set the containers NO_GPU_DETACH option to true and will prevent the cleanup script from detaching the GPU from the container when it gets disabled on its expiry date, preventing it being added into the pool of available GPUs.
+
+The cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers but it does not automatically delete containers that have NO_GPU_DETACH set to true.
 
 ```
 incus config set Jim-Smith user.nogpudetach true
@@ -80,25 +82,25 @@ incus config get Jim-Smith user.nogpudetach
 
 gpu-stats.py can be run to generate NVIDIA GPU stat log files using nvitop for all active MIG and non-MIG enabled GPUs.
 
-* Create the virtual environment
+* Create the virtual environment:
 ```
 python3 -m venv /root/gpu-env
 ```
 
-* Install nvitop specifically into that environment
+* Install nvitop specifically into that environment:
 ```
 /root/gpu-env/bin/pip install nvitop
 ```
-* Run your script using the environment's python
+* Run your script using the environment's python:
 ```
 /root/gpu-env/bin/python3 /root/gpu-env/bin/gpu-stats.py
 ```
 
- Adjust that last path to point to wherever you copied gpu-stats.py.
+Adjust that last path to point to wherever you copied **gpu-stats.py**
  
 ## incus logging
  
-The incus documentation [recommends setting up a Prometheus server](https://linuxcontainers.org/incus/docs/main/metrics/) for monitoring incus metrics but if you don't need to capture every incus metric or you don't have the resources to also run a Prometheus server you could instead create a root cron job like this:
+The incus documentation [recommends setting up a Prometheus server](https://linuxcontainers.org/incus/docs/main/metrics/) for monitoring incus metrics but if you don't need to capture every incus metric or you don't have the resources to run a Prometheus server you could instead create a root cron job like this:
  
 ```
 * * * * * /usr/bin/incus list status=running -f csv -c n4Dmu,devices:gpu0.mig.uuid,devices:gpu0.pci | /usr/bin/awk -v ts="$(date '+%Y-%m-%d %H:%M:%S')" '{ print ts "," $0 }' >> /var/log/incus/incus-stats.log
