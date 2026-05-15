@@ -60,6 +60,18 @@ Change expiry date of Tim's container:
 incus config set Tim-Smith user.expiry 2020-06-21
 ```
 
+To change Dan's CPU limit to 32 CPU cores:
+
+```
+incus config set Dan-MacDonald limits.cpu 32
+```
+
+To change Jim's RAM limit to 64GB:
+
+```
+incus config set Jim-Smith limits.memory 64GB
+```
+
 ## Using the -n (NO_GPU_DETACH) option
 
 This script presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g to randomly assign a MIG GPU from the ones currently available.
@@ -79,20 +91,6 @@ To check the nogpudetach config option:
 ```
 incus config get Jim-Smith user.nogpudetach
 ```
-
-To change Dan's CPU limit to 32 CPU cores:
-
-```
-incus config set Dan-MacDonald limits.cpu 32
-```
-
-To change Jim's RAM limit to 64GB:
-
-```
-incus config set Jim-Smith limits.memory 64GB
-```
-
-The last two are standard incus commands I've included just for convenience and as useful, commonly used examples.
 
 This is the end of the incus-mig section of the README. What follows are notes on the other scripts in this repo.
 
