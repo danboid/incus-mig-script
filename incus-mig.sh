@@ -118,29 +118,67 @@ echo "Status: Determining IP Address..."
 USED_IPS=$(incus list -c devices:eth0.ipv4.address --format csv | grep -v '^$')
 
 if [ -z "$CUSTOM_IP" ]; then
-    FIRST_IP=$(echo "$USED_IPS" | head -n 1)
-    if [ -n "$FIRST_IP" ]; then
-        PREFIX=$(echo "$FIRST_IP" | cut -d. -f1-3)
-    else
-        PREFIX="10.95.1"
+    # Detect Bridge Interface
+    IFACE=$(ip -4 route show default | grep -oP '(?<=dev )incusbr0' || ip -4 route show default | grep -oP '(?<=dev )br0' || echo "")
+
+    # If not on default route, just check if they exist
+    if [ -z "$IFACE" ]; then
+        [ -d /sys/class/net/incusbr0 ] && IFACE="incusbr0"
+        [ -d /sys/class/net/br0 ] && IFACE="br0"
     fi
 
-    LAST_OCTET=$(echo "$USED_IPS" | cut -d. -f4 | sort -n | tail -n 1)
-    [ -z "$LAST_OCTET" ] && LAST_OCTET=1
+    if [ -n "$IFACE" ]; then
+        # Get IP and Mask (e.g., 10.90.146.75/26)
+        ADDR_INFO=$(ip -4 addr show "$IFACE" | grep -oP 'inet \K[\d./]+')
+        BRIDGE_IP=$(echo "$ADDR_INFO" | cut -d/ -f1)
+        PREFIX=$(echo "$BRIDGE_IP" | cut -d. -f1-3)
 
+        # Determine the network range using the mask
+        MASK=$(echo "$ADDR_INFO" | cut -d/ -f2)
+
+        # Calculate the start of the subnet (for small subnets like /26)
+        # We'll stick to the current prefix but ensure we don't exceed the mask's capacity
+        if [ "$MASK" -eq 32 ]; then
+             echo "Error: Subnet mask /32 is too small."; exit 1
+        fi
+
+        # Calculate max possible octet based on mask
+        # 2^(32-mask) - 2 (for network and broadcast)
+        NUM_HOSTS=$(( 2**(32 - MASK) ))
+        NETWORK_BASE=$(( $(echo "$BRIDGE_IP" | cut -d. -f4) / NUM_HOSTS * NUM_HOSTS ))
+        MAX_OCTET=$(( NETWORK_BASE + NUM_HOSTS - 2 ))
+        MIN_OCTET=$(( NETWORK_BASE + 1 ))
+
+        echo "Status: Detected $IFACE ($BRIDGE_IP/$MASK). Range: .$MIN_OCTET to .$MAX_OCTET"
+    else
+        # Final Fallback
+        PREFIX="10.95.1"
+        MIN_OCTET=2
+        MAX_OCTET=254
+        echo "Status: No bridge found. Defaulting to $PREFIX.$MIN_OCTET-$MAX_OCTET"
+    fi
+
+    # Find a free IP
     FOUND_IP=false
-    CURRENT_OCTET=$((LAST_OCTET + 1))
+    CURRENT_OCTET=$MIN_OCTET
 
     while [ "$FOUND_IP" = false ]; do
         TRY_IP="$PREFIX.$CURRENT_OCTET"
-        # Check if IP is in the used list OR responds to ping
-        if ! echo "$USED_IPS" | grep -q "$TRY_IP" && ! ping -c 1 -W 1 "$TRY_IP" >/dev/null 2>&1; then
-            TARGET_IP=$TRY_IP
-            FOUND_IP=true
-        else
-            CURRENT_OCTET=$((CURRENT_OCTET + 1))
+
+        # Skip the bridge's own IP
+        if [ "$TRY_IP" != "$BRIDGE_IP" ]; then
+            if ! echo "$USED_IPS" | grep -q "$TRY_IP" && ! ping -c 1 -W 1 "$TRY_IP" >/dev/null 2>&1; then
+                TARGET_IP=$TRY_IP
+                FOUND_IP=true
+            fi
         fi
-        [ "$CURRENT_OCTET" -gt 254 ] && { echo "Error: No free IP in $PREFIX.x range."; exit 1; }
+
+        CURRENT_OCTET=$((CURRENT_OCTET + 1))
+
+        if [ "$CURRENT_OCTET" -gt "$MAX_OCTET" ]; then
+            echo "Error: No free IP found in range .$MIN_OCTET to .$MAX_OCTET"
+            exit 1
+        fi
     done
 else
     TARGET_IP=$CUSTOM_IP
