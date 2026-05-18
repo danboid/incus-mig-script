@@ -8,7 +8,13 @@ You must have the CUDA toolkit installed on the incus server and you need to hav
 
 **incus-mig.sh** also configures incus snapshots (one every 12 hours), installs **openssh-server** and configures a password for the root user. It is recommended you use a ZFS based incus storage pool so that incus can take advantage of native ZFS snapshots.
 
-**incus-cleanup.sh** should be configured to be run via a daily root cron job to disable and delete old containers. **gpu-stats.py** can be run via cron to log NVIDIA GPU activity via **nvitop**.
+**incus-cleanup.sh** should be configured to be run via a daily root cron job to disable and delete old containers, for example:
+
+```
+0 2 * * * /usr/local/bin/incus-cleanup.sh
+```
+
+**gpu-stats.py** can be run via cron to log NVIDIA GPU activity via **nvitop**. See below for more details.
 
 Do not use dots or any other punctuation for container names.
 
