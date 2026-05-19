@@ -23,6 +23,7 @@ PASSTHROUGH_PCI=""
 CUSTOM_IP=""
 NO_GPU_DETACH="false"
 FULL_CUDA_INSTALL=false
+SKIP_EXPIRY=false
 
 # Calculate expiry date (exactly 2 months from today)
 EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
@@ -40,10 +41,11 @@ usage() {
     echo "  -G (GPU)     Enable PCI Passthrough GPU eg 01:00.0"
     echo "  -n           Set user.nogpudetach to true (Defaults to false. Use with -m)"
     echo "  -f           Full CUDA toolkit install"
+    echo "  -x           Skip adding an expiry date to the container"
     exit 1
 }
 
-while getopts "d:i:c:r:s:gm:G:nf" opt; do
+while getopts "d:i:c:r:s:gm:G:nfx" opt; do
     case $opt in
         d)
             case ${OPTARG,,} in
@@ -62,6 +64,7 @@ while getopts "d:i:c:r:s:gm:G:nf" opt; do
         G) PASSTHROUGH_PCI=$OPTARG ;;
         n) NO_GPU_DETACH="true" ;;
         f) FULL_CUDA_INSTALL=true ;;
+        x) SKIP_EXPIRY=true ;;
         *) usage ;;
     esac
 done
@@ -196,9 +199,15 @@ LAUNCH_FLAGS=(
     "--config" "snapshots.schedule=0 */12 * * *"
     "--config" "snapshots.expiry=3m"
     "--config" "snapshots.pattern={{ creation_date|date:'2006-01-02_15-04-05' }}"
-    "--config" "user.expiry=$EXPIRY_DATE"
     "--config" "user.nogpudetach=$NO_GPU_DETACH"
 )
+
+# Conditionally add expiry date if -x flag is used.
+if [ "$SKIP_EXPIRY" = false ]; then
+    LAUNCH_FLAGS+=("--config" "user.expiry=$EXPIRY_DATE")
+else
+    EXPIRY_DATE="None"
+fi
 
 if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
     LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
