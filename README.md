@@ -14,6 +14,8 @@ You must have the CUDA toolkit installed on the incus server and you need to hav
 0 2 * * * /usr/local/bin/incus-cleanup.sh
 ```
 
+New containers created with incus-mig are given an expiry date two months from the day of creation by default. To skip adding an expiry date use the -x flag.
+
 **gpu-stats.py** can be run via cron to log NVIDIA GPU activity via **nvitop**. See below for more details.
 
 Do not use dots or any other punctuation for container names.
