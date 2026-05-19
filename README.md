@@ -8,7 +8,9 @@ You must have the CUDA toolkit installed on the incus server and you need to hav
 
 **incus-mig.sh** also configures incus snapshots (one every 12 hours), installs **openssh-server** and configures a password for the root user. It is recommended you use a ZFS based incus storage pool so that incus can take advantage of native ZFS snapshots.
 
-**incus-cleanup.sh** should be configured to be run via a daily root cron job to disable and delete old containers, for example:
+**incus-cleanup.sh** should be configured to be run via a daily root cron job to disable and delete old containers.
+
+The following root cron job could be used to run the incus-cleanup.sh script at 2 AM every day, if it was copied into /usr/local/bin.
 
 ```
 0 2 * * * /usr/local/bin/incus-cleanup.sh
