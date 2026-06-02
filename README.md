@@ -134,3 +134,6 @@ The incus documentation [recommends setting up a Prometheus server](https://linu
 
 This will log the memory, CPU, used disk space and IP address of all running incus containers. It will also log either the MIG UUID or PCI ID if a gpu is attached to a container as device ID gpu0.
 
+## incus-info.sh
+
+incus-info.sh can be used to generate a simple web page dashboard that displays the names of all active incus containers and their expiry dates.
