@@ -1,10 +1,10 @@
 # incus-mig
 
-**incus-mig** automates the creation of Debian and Ubuntu [incus containers](https://linuxcontainers.org/incus/), focusing on making it easy to attach a [NVIDIA MIG](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/index.html) or a full NVIDIA PCI express GPU although doing any of that is optional. It can be otherwise used as a quick and easy way to create Debian and Ubuntu incus containers.
+**incus-mig** automates the creation of Debian and Ubuntu [incus containers](https://linuxcontainers.org/incus/) and virtual machines, focusing on making it easy to attach a [NVIDIA MIG](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/index.html) or a full NVIDIA PCI express GPU although doing any of that is optional. It can be otherwise used as a quick and easy way to create Debian and Ubuntu incus instances.
 
 This script requires root access and has to be run on an incus server that has been configured to use an incus managed network bridge interface, created and managed by incus.
 
-You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using [mig-parted](https://github.com/NVIDIA/mig-parted)) before running the script if you wish to use the -g or -m option to attach a MIG GPU. You should be able to use -G without any MIG to do PCIe passthrough of a full GPU to an incus container.
+You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using [mig-parted](https://github.com/NVIDIA/mig-parted)) before running the script if you wish to use the -g or -m option to attach a MIG GPU. You should be able to use -G without any MIG to do PCIe passthrough of a full GPU to an incus container or VM.
 
 **incus-mig.sh** also configures incus snapshots (one every 12 hours), installs **openssh-server** and configures a password for the root user. It is recommended you use a ZFS based incus storage pool so that incus can take advantage of native ZFS snapshots.
 
@@ -16,15 +16,15 @@ The following root cron job could be used to run the incus-cleanup.sh script at 
 0 2 * * * /usr/local/bin/incus-cleanup.sh
 ```
 
-New containers created with incus-mig are given an expiry date two months from the day of creation by default. To skip adding an expiry date use the -x flag.
+New containers and VMs created with incus-mig are given an expiry date two months from the day of creation by default. To skip adding an expiry date use the -x flag.
 
 **gpu-stats.py** can be run via cron to log NVIDIA GPU activity via **nvitop**. See below for more details.
 
 Do not use dots or any other punctuation for container names.
 
-## incus-mig container creation commands
+## incus-mig container creation example commands
 
-Before running any of the following incus-mig commands, check and adjust the default values at the top of the script and adjust them to values suitable for new containers being created on your incus server. Most of them can be set on the command line. Run **incus-mig.sh** without any options to see all of the command line options that **incus-mig.sh** has.
+Before running any of the following incus-mig commands, check and adjust the default values at the top of the script and adjust them to values suitable for new incus units being created on your incus server. Most of them can be set on the command line. Run **incus-mig.sh** without any options to see all of the command line options that **incus-mig.sh** has.
 
 Create a Ubuntu (24.04) incus container called **Jim-Smith** with no GPU attached using the default spec defined within the script (900GB HD, 32GB RAM and 8 CPU cores):
 
@@ -44,6 +44,11 @@ Create a container called **Dan-MacDonald** with 128GB RAM, 16 CPU cores with th
 incus-mig.sh -c 16 -r 128GB -G 01:00.0 Dan-MacDonald
 ```
 
+Create a VM with no expiry date:
+```
+incus-mig.sh -v -x Mr-Trismegistus
+```
+
 ## Key incus-mig server admin commands
 
 List all configured MIG GPUs whether attached to an incus container or not:
@@ -52,13 +57,13 @@ List all configured MIG GPUs whether attached to an incus container or not:
 nvidia-smi -L
 ```
 
-List all incus containers and any attached MIG GPU ids, if configured:
+List all incus containers, VMs and any attached MIG GPU ids, if configured:
 
 ```
 incus list -f compact -c n,devices:gpu0.mig.uuid
 ```
 
-Get expiry date of container named Tim-Smith:
+Get expiry date of container/VM named Tim-Smith:
 
 ```
 incus config get Tim-Smith user.expiry
