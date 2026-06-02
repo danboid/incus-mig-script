@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# A script to automate the creation of Incus Ubuntu containers with optional attaching of a NVIDIA MIG or PCI GPU.
+# A script to automate the creation of Debian and Ubuntu incus containers or VMs with optional attaching of a NVIDIA MIG or PCI GPU.
 
-# This script depends upon the default incus profile being configured to use a managed bridge created by incus.
+# This script depends upon the default incus profile being configured to use a managed incus bridge.
 
 # by Dan MacDonald
 
@@ -24,12 +24,13 @@ CUSTOM_IP=""
 NO_GPU_DETACH="false"
 FULL_CUDA_INSTALL=false
 SKIP_EXPIRY=false
+INSTANCE_TYPE="container"
 
 # Calculate expiry date (exactly 2 months from today)
 EXPIRY_DATE=$(date -d "+2 months" +%Y-%m-%d)
 
 usage() {
-    echo "Usage: $0 [OPTIONS] <container_name>"
+    echo "Usage: $0 [OPTIONS] <instance_name>"
     echo "Options:"
     echo "  -d (Distro)  Set OS: u2404 (Ubuntu 24.04), u2604 (Ubuntu 26.04), d13 (Debian 13)"
     echo "  -i (IP)      Set custom IP eg 10.95.1.11"
@@ -41,11 +42,12 @@ usage() {
     echo "  -G (GPU)     Enable PCI Passthrough GPU eg 01:00.0"
     echo "  -n           Set user.nogpudetach to true (Defaults to false. Use with -m)"
     echo "  -f           Full CUDA toolkit install"
-    echo "  -x           Skip adding an expiry date to the container"
+    echo "  -x           Skip adding an expiry date to the instance"
+    echo "  -v           Create an Incus Virtual Machine instead of a container"
     exit 1
 }
 
-while getopts "d:i:c:r:s:gm:G:nfx" opt; do
+while getopts "d:i:c:r:s:gm:G:nfxv" opt; do
     case $opt in
         d)
             case ${OPTARG,,} in
@@ -65,22 +67,23 @@ while getopts "d:i:c:r:s:gm:G:nfx" opt; do
         n) NO_GPU_DETACH="true" ;;
         f) FULL_CUDA_INSTALL=true ;;
         x) SKIP_EXPIRY=true ;;
+        v) INSTANCE_TYPE="virtual-machine" ;;
         *) usage ;;
     esac
 done
 
 shift $((OPTIND-1))
-CONTAINER_NAME=$1
+INSTANCE_NAME=$1
 
-[ -z "$CONTAINER_NAME" ] && usage
+[ -z "$INSTANCE_NAME" ] && usage
 
 if [ "$MIG_ENABLED" = true ] && [ -n "$PASSTHROUGH_PCI" ]; then
     echo "Error: Cannot use MIG (-g/-m) and PCI Passthrough (-G) together."
     exit 1
 fi
 
-if incus info "$CONTAINER_NAME" >/dev/null 2>&1; then
-    echo "Error: Container '$CONTAINER_NAME' already exists."
+if incus info "$INSTANCE_NAME" >/dev/null 2>&1; then
+    echo "Error: Instance '$INSTANCE_NAME' already exists."
     exit 1
 fi
 
@@ -190,17 +193,23 @@ fi
 ROOT_PASSWORD=$(pwgen -s 16 1)
 
 # --- EXECUTION ---
-echo "--- Initializing: $CONTAINER_NAME ($TARGET_IP) using $OS_IMAGE ---"
+echo "--- Initializing: $INSTANCE_NAME ($TARGET_IP) using $OS_IMAGE ---"
 
 LAUNCH_FLAGS=(
     "--config" "limits.cpu=$CPU_LIMIT"
     "--config" "limits.memory=$RAM_LIMIT"
-    "--config" "raw.lxc=lxc.apparmor.profile=unconfined"
     "--config" "snapshots.schedule=0 */12 * * *"
     "--config" "snapshots.expiry=3m"
     "--config" "snapshots.pattern={{ creation_date|date:'2006-01-02_15-04-05' }}"
     "--config" "user.nogpudetach=$NO_GPU_DETACH"
 )
+
+# Apparmor profile manipulation is container-specific; omit for VMs
+if [ "$INSTANCE_TYPE" = "container" ]; then
+    LAUNCH_FLAGS+=("--config" "raw.lxc=lxc.apparmor.profile=unconfined")
+else
+    LAUNCH_FLAGS+=("--vm")
+fi
 
 # Conditionally add expiry date if -x flag is used.
 if [ "$SKIP_EXPIRY" = false ]; then
@@ -213,56 +222,57 @@ if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
     LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
 fi
 
-incus launch "$OS_IMAGE" "$CONTAINER_NAME" "${LAUNCH_FLAGS[@]}"
-incus config device override "$CONTAINER_NAME" root size="$DISK_LIMIT"
-incus config device override "$CONTAINER_NAME" eth0 ipv4.address="$TARGET_IP"
+incus launch "$OS_IMAGE" "$INSTANCE_NAME" "${LAUNCH_FLAGS[@]}"
+incus config device override "$INSTANCE_NAME" root size="$DISK_LIMIT"
+incus config device override "$INSTANCE_NAME" eth0 ipv4.address="$TARGET_IP"
 
 echo "Status: Applying Network configuration..."
-incus restart "$CONTAINER_NAME"
+incus restart "$INSTANCE_NAME"
 
 # --- GPU ATTACHMENT ---
 if [ "$MIG_ENABLED" = true ]; then
     echo "Status: Attaching MIG device ($SELECTED_MIG_UUID)..."
-    incus stop "$CONTAINER_NAME"
-    incus config device add "$CONTAINER_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
-    incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
-    incus start "$CONTAINER_NAME"
+    incus stop "$INSTANCE_NAME"
+    incus config device add "$INSTANCE_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
+    incus config set "$INSTANCE_NAME" nvidia.driver.capabilities all
+    incus start "$INSTANCE_NAME"
 elif [ -n "$PASSTHROUGH_PCI" ]; then
     echo "Status: Attaching PCI Passthrough GPU ($PASSTHROUGH_PCI)..."
-    incus config device add "$CONTAINER_NAME" gpu0 gpu pci="$PASSTHROUGH_PCI"
-    incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
+    incus config device add "$INSTANCE_NAME" gpu0 gpu pci="$PASSTHROUGH_PCI"
+    incus config set "$INSTANCE_NAME" nvidia.driver.capabilities all
 fi
 
 # --- SSH SETUP ---
 echo "Status: Configuring SSH..."
-sleep 2
-incus exec "$CONTAINER_NAME" -- sh -c "apt update && apt install -y openssh-server"
-incus exec "$CONTAINER_NAME" -- sh -c "sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
-incus exec "$CONTAINER_NAME" -- systemctl restart ssh
-echo "root:$ROOT_PASSWORD" | incus exec "$CONTAINER_NAME" -- chpasswd
-incus exec "$CONTAINER_NAME" -- apt upgrade -y
+sleep 5 # Extra fallback time for VM boot cycles up to agent initialization
+incus exec "$INSTANCE_NAME" -- sh -c "apt update && apt install -y openssh-server"
+incus exec "$INSTANCE_NAME" -- sh -c "sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
+incus exec "$INSTANCE_NAME" -- systemctl restart ssh
+echo "root:$ROOT_PASSWORD" | incus exec "$INSTANCE_NAME" -- chpasswd
+incus exec "$INSTANCE_NAME" -- apt upgrade -y
 
 # --- FULL CUDA TOOLKIT INSTALL FOR CUDA DEV - WIP ---
 if [ "$FULL_CUDA_INSTALL" = true ]; then
     echo "Status: Flag -f detected. Installing CUDA Toolkit..."
-    incus stop "$CONTAINER_NAME"
-    [ "$MIG_ENABLED" = true ] && incus config device remove "$CONTAINER_NAME" gpu0
-    incus config set "$CONTAINER_NAME" nvidia.runtime false
-    incus start "$CONTAINER_NAME"
+    incus stop "$INSTANCE_NAME"
+    [ "$MIG_ENABLED" = true ] && incus config device remove "$INSTANCE_NAME" gpu0
+    incus config set "$INSTANCE_NAME" nvidia.runtime false
+    incus start "$INSTANCE_NAME"
 
-    incus exec "$CONTAINER_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt update && apt install -y --no-install-recommends nvidia-cuda-toolkit"
+    incus exec "$INSTANCE_NAME" -- sh -c "DEBIAN_FRONTEND=noninteractive apt update && apt install -y --no-install-recommends nvidia-cuda-toolkit"
 
-    incus stop "$CONTAINER_NAME"
-    incus config set "$CONTAINER_NAME" nvidia.runtime true
+    incus stop "$INSTANCE_NAME"
+    incus config set "$INSTANCE_NAME" nvidia.runtime true
     if [ "$MIG_ENABLED" = true ]; then
-        incus config device add "$CONTAINER_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
-        incus config set "$CONTAINER_NAME" nvidia.driver.capabilities all
+        incus config device add "$INSTANCE_NAME" gpu0 gpu gputype=mig mig.uuid="$SELECTED_MIG_UUID" pci="$SELECTED_PCI_ID"
+        incus config set "$INSTANCE_NAME" nvidia.driver.capabilities all
     fi
-    incus start "$CONTAINER_NAME"
+    incus start "$INSTANCE_NAME"
 fi
 
 echo "------------------------------------------------"
-echo "Success: $CONTAINER_NAME is online at $TARGET_IP"
+echo "Success: $INSTANCE_NAME is online at $TARGET_IP"
+echo "TYPE: $INSTANCE_TYPE"
 echo "IMAGE: $OS_IMAGE"
 echo "EXPIRY: $EXPIRY_DATE | NOGPUDETACH: $NO_GPU_DETACH"
 [ "$MIG_ENABLED" = true ] && echo "MIG: $SELECTED_MIG_UUID"
