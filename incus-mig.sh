@@ -202,6 +202,7 @@ LAUNCH_FLAGS=(
     "--config" "snapshots.expiry=3m"
     "--config" "snapshots.pattern={{ creation_date|date:'2006-01-02_15-04-05' }}"
     "--config" "user.nogpudetach=$NO_GPU_DETACH"
+    "--device" "eth0,ipv4.address=$TARGET_IP"
 )
 
 # Apparmor profile manipulation is container-specific; omit for VMs
@@ -222,14 +223,18 @@ if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
     LAUNCH_FLAGS+=("--config" "nvidia.runtime=true")
 fi
 
+# Launch instance with settings injected
 incus launch "$OS_IMAGE" "$INSTANCE_NAME" "${LAUNCH_FLAGS[@]}"
-incus config device override "$INSTANCE_NAME" root size="$DISK_LIMIT"
-incus config device override "$INSTANCE_NAME" eth0 ipv4.address="$TARGET_IP"
 
-echo "Status: Applying Network configuration..."
-incus restart "$INSTANCE_NAME"
+# Override root disk limit (safe to run directly after launch)
+incus config device override "$INSTANCE_NAME" root size="$DISK_LIMIT"
 
 # --- GPU ATTACHMENT ---
+if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
+    echo "Status: Waiting for instance agent to initialize before modifying hardware config..."
+    incus wait "$INSTANCE_NAME" agent
+fi
+
 if [ "$MIG_ENABLED" = true ]; then
     echo "Status: Attaching MIG device ($SELECTED_MIG_UUID)..."
     incus stop "$INSTANCE_NAME"
@@ -243,8 +248,10 @@ elif [ -n "$PASSTHROUGH_PCI" ]; then
 fi
 
 # --- SSH SETUP ---
+echo "Status: Waiting for instance environment to become fully ready..."
+incus wait "$INSTANCE_NAME" agent
+
 echo "Status: Configuring SSH..."
-sleep 5 # Extra fallback time for VM boot cycles up to agent initialization
 incus exec "$INSTANCE_NAME" -- sh -c "apt update && apt install -y openssh-server"
 incus exec "$INSTANCE_NAME" -- sh -c "sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
 incus exec "$INSTANCE_NAME" -- systemctl restart ssh
