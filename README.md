@@ -4,7 +4,9 @@
 
 This script requires root access and has to be run on an incus server that has been configured to use an incus managed network bridge interface, created and managed by incus.
 
-You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using [mig-parted](https://github.com/NVIDIA/mig-parted)) before running the script if you wish to use the -g or -m option to attach a MIG GPU. You should be able to use -G without any MIG to do PCIe passthrough of a full GPU to an incus container or VM.
+You must have the CUDA toolkit installed on the incus server and you need to have configured at least one MIG device (using [mig-parted](https://github.com/NVIDIA/mig-parted)) before running the script if you wish to use the -g or -m option to attach a MIG GPU. The incus-mig -g and -m (MIG GPU attach) options only work with containers. incus and incus-mig do not support attaching MIG GPUs to virtual machines.
+
+You should be able to use -G without any MIG to do PCIe passthrough of a full GPU to an incus container or VM.
 
 **incus-mig.sh** also configures incus snapshots (one every 12 hours), installs **openssh-server** and configures a password for the root user. It is recommended you use a ZFS based incus storage pool so that incus can take advantage of native ZFS snapshots.
 
