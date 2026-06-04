@@ -43,7 +43,7 @@ usage() {
     echo "  -n           Set user.nogpudetach to true (Defaults to false. Use with -m)"
     echo "  -f           Full CUDA toolkit install"
     echo "  -x           Skip adding an expiry date to the instance"
-    echo "  -v           Create an Incus Virtual Machine instead of a container"
+    echo "  -v           Create an incus virtual machine instead of a container"
     exit 1
 }
 
@@ -134,7 +134,7 @@ if [ -z "$CUSTOM_IP" ]; then
     fi
 
     if [ -n "$IFACE" ]; then
-        # Get IP and Mask (e.g., 10.90.146.75/26)
+        # Get IP and Mask (e.g., 10.95.1.20/24)
         ADDR_INFO=$(ip -4 addr show "$IFACE" | grep -oP 'inet \K[\d./]+')
         BRIDGE_IP=$(echo "$ADDR_INFO" | cut -d/ -f1)
         PREFIX=$(echo "$BRIDGE_IP" | cut -d. -f1-3)
@@ -142,14 +142,11 @@ if [ -z "$CUSTOM_IP" ]; then
         # Determine the network range using the mask
         MASK=$(echo "$ADDR_INFO" | cut -d/ -f2)
 
-        # Calculate the start of the subnet (for small subnets like /26)
-        # We'll stick to the current prefix but ensure we don't exceed the mask's capacity
         if [ "$MASK" -eq 32 ]; then
              echo "Error: Subnet mask /32 is too small."; exit 1
         fi
 
         # Calculate max possible octet based on mask
-        # 2^(32-mask) - 2 (for network and broadcast)
         NUM_HOSTS=$(( 2**(32 - MASK) ))
         NETWORK_BASE=$(( $(echo "$BRIDGE_IP" | cut -d. -f4) / NUM_HOSTS * NUM_HOSTS ))
         MAX_OCTET=$(( NETWORK_BASE + NUM_HOSTS - 2 ))
@@ -231,8 +228,13 @@ incus config device override "$INSTANCE_NAME" root size="$DISK_LIMIT"
 
 # --- GPU ATTACHMENT ---
 if [ "$MIG_ENABLED" = true ] || [ -n "$PASSTHROUGH_PCI" ]; then
-    echo "Status: Waiting for instance agent to initialize before modifying hardware config..."
-    incus wait "$INSTANCE_NAME" agent
+    if [ "$INSTANCE_TYPE" = "virtual-machine" ]; then
+        echo "Status: Waiting for instance agent to initialize before modifying hardware config..."
+        incus wait "$INSTANCE_NAME" agent
+    else
+        echo "Status: Waiting for container environment to initialize..."
+        until incus exec "$INSTANCE_NAME" -- hostname &>/dev/null; do sleep 1; done
+    fi
 fi
 
 if [ "$MIG_ENABLED" = true ]; then
@@ -249,7 +251,13 @@ fi
 
 # --- SSH SETUP ---
 echo "Status: Waiting for instance environment to become fully ready..."
-incus wait "$INSTANCE_NAME" agent
+if [ "$INSTANCE_TYPE" = "virtual-machine" ]; then
+    incus wait "$INSTANCE_NAME" agent
+else
+    until incus exec "$INSTANCE_NAME" -- systemctl is-system-running 2>/dev/null | grep -qE "running|degraded"; do
+        sleep 1
+    done
+fi
 
 echo "Status: Configuring SSH..."
 incus exec "$INSTANCE_NAME" -- sh -c "apt update && apt install -y openssh-server"
