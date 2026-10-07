@@ -91,11 +91,17 @@ incus config set Jim-Smith limits.memory 64GB
 
 ## Using the -n (NO_GPU_DETACH) option
 
-This script presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g to randomly assign a MIG GPU from the ones currently available.
+incus-mig.sh presumes that all of your free MIG GPUs have the same configuration so it attaches any unused MIG GPU to the new container when you use the -g option. Therefore, if you have have some MIG GPUs using a different MIG profile to the bulk of your MIG GPUs, you should assign those different spec GPUs to containers using the -m option so that this script doesn't attempt to assign the different spec MIG GPUs to new containers when you use -g to randomly assign a MIG GPU from the ones currently available.
 
 When you are creating a container that will use a MIG GPU that you don't want to be auto-assigned by the incus-mig script using -m , you should also use -n (NO_GPU_DETACH). Using -n will set the containers NO_GPU_DETACH option to true and will prevent the cleanup script from detaching the GPU from the container when it gets disabled on its expiry date, preventing it being added into the pool of available GPUs.
 
 The cleanup script will detach GPUs from containers on their expiry date so that they may be used by new containers but it does not automatically delete containers that have NO_GPU_DETACH set to true.
+
+Thus, the process of using of `-n` starts with finding the MIG ID of the GPU that you want to be exempt from joining the pool of matching MIG GPUs using `nvidia-smi -L`. You would then create a container using a command similar to this.
+
+```
+incus-mig.sh -n -m MIG-4b4e975f-7c46-5bc6-9505-587a543add2a 40gb-Stephane-Graber
+```
 
 If you DIDN'T use the -n option when creating Jim's container, you could run:
 
